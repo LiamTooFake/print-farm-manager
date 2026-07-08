@@ -42,8 +42,19 @@ async function getConnection(printer) {
     if (process.env.DEBUG_ELEGOO) console.warn(`[elegoo] ${printer.name} error:`, err?.message || err);
   });
 
-  await client.Connect(printer.ip);
+  // Register BEFORE awaiting Connect. If a concurrent dropConnection (printer
+  // deleted/decommissioned mid-connect) ran while we awaited, it would find
+  // nothing in the map and no-op, leaving this client — with AutoReconnect — to
+  // reconnect forever to a printer that no longer exists. Registering first also
+  // prevents a concurrent getConnection from opening a second client. On connect
+  // failure, remove it so a later poll re-creates it.
   connections.set(printer.id, client);
+  try {
+    await client.Connect(printer.ip);
+  } catch (err) {
+    dropConnection(printer.id);
+    throw err;
+  }
   console.log(`[elegoo] Connected to ${printer.name} (${printer.ip})`);
   return client;
 }

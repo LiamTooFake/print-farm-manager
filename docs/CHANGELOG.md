@@ -59,6 +59,21 @@ A pass over the server's failure modes. The theme: one bad thing should not take
 ### Follow-ups (not in this change)
 - `set-ready`'s multi-write credit sequence is not wrapped in a transaction, so a mid-sequence throw could leave a partial credit. Throws there are very unlikely (simple synchronous SQLite on validated ints), but wrapping the DB work in `db.transaction()` would make it atomic. Left out to avoid restructuring the delicate credit logic in a reliability-only pass.
 
+### Follow-up (adversarial review) — 2026-07-07
+
+A multi-agent adversarial review of the above diff (9 reviewers + per-finding refutation) confirmed **no part-count risk and no crash bugs** — the credit path is untouched. It surfaced several P3 issues, now fixed:
+
+- **[C1] elegoo-centauri connect-window leak.** `getConnection` registered the client into the `connections` map *after* `await client.Connect()`. A `DELETE`/decommission during that await found nothing to drop, so the resolved client (with `AutoReconnect`) reconnected forever to a printer that no longer existed — the exact leak this change set out to kill. Also a latent double-connect race. Fixed by registering before the await and removing the client on connect failure (matching the bambu/CC2 pattern).
+- **[C3] crash handlers lost the `[FATAL]` path for load-time throws.** Moving `uncaughtException`/`unhandledRejection` below the `require`/`init` block meant a throw during module load bypassed the guaranteed synchronous `stderr` logging. Moved both back above the requires; runtime state (`poller`/`server`/`shuttingDown`) is declared first and `shutdown()` guards every step, so an early crash still exits cleanly.
+- **[C2] stale driver connections after restore.** `POST /api/backup/restore` wipes and reinserts `printers` but never dropped cached MQTT/WS clients, so a restore that changed a printer's IP left the poller using the stale client until restart. Now calls `drivers.closeAllConnections()` after the restore commits; the next poll rebuilds from restored config.
+- **[M1] hourly backup vs `db.close()` on shutdown.** The new graceful `db.close()` could close the connection mid-`db.backup()`. Added `backup.stop()` (clears the interval), called first in `shutdown()`.
+- **[M2] notifications and backup.** Documented that the now-persistent `notifications` table is intentionally excluded from farm backup/restore (live operational state; re-raised by the scheduler if still unresolved).
+- **Tests.** Added `printers-dropconnection.test.js` — spies `drivers.dropConnection` and asserts every fleet-exit route (delete + all four decommission paths) calls it with the printer row (the headline fix was previously executed but unasserted). Fixed a tautological memoization assertion in `drivers-registry.test.js` and wrapped the notifications survives-restart temp file in `try/finally` (incl. WAL sidecars).
+
+Verified clean via the full suite (**27 suites, 402 tests**) and a live boot (`/api/health` green on the restructured `index.js`).
+
+Remaining coverage gaps the review flagged (no live defect; regression-protection only): direct tests for `shutdown()` ordering, the `/api/health` branches, and the global error handler would each need `index.js` to export those units (or an `if (require.main === module)` listen guard for full-server integration tests) — deferred.
+
 ---
 
 ## 2026-07-06 - update.bat: discard package-lock.json drift before pulling

@@ -59,19 +59,25 @@ describe('notifications (DB-backed)', () => {
 
 test('notifications survive a restart — a fresh DB connection still sees them', () => {
   const file = tmpFile();
-  const db1 = new Database(file);
-  db1.exec(SCHEMA);
-  notifications.init(db1);
-  notifications.add('printer held: re-upload MK4S gcode');
-  db1.close(); // process "dies"
+  try {
+    const db1 = new Database(file);
+    db1.exec(SCHEMA);
+    notifications.init(db1);
+    notifications.add('printer held: re-upload MK4S gcode');
+    db1.close(); // process "dies"
 
-  // New process boots against the same DB file.
-  const db2 = new Database(file);
-  notifications.init(db2);
-  expect(notifications.list().map(n => n.message)).toContain('printer held: re-upload MK4S gcode');
-  db2.close();
-  notifications.init(null);
-  fs.unlinkSync(file);
+    // New process boots against the same DB file.
+    const db2 = new Database(file);
+    notifications.init(db2);
+    expect(notifications.list().map(n => n.message)).toContain('printer held: re-upload MK4S gcode');
+    db2.close();
+  } finally {
+    // Always clean up, even if an assertion throws — including WAL sidecars.
+    notifications.init(null);
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+      try { fs.unlinkSync(f); } catch (_) {}
+    }
+  }
 });
 
 test('falls back to in-memory when no DB is initialized', () => {

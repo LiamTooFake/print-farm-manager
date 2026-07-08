@@ -1,3 +1,25 @@
+// Runtime state — declared before the crash handlers below so shutdown() is safe
+// to run even if a fault fires during module load (these stay null until startup).
+let poller       = null;
+let scheduler    = null;
+let server       = null;
+let shuttingDown = false;
+
+// Install the crash handlers FIRST — before any require() — so a synchronous throw
+// during module load or DB init is still logged via the guaranteed synchronous
+// stderr write, even if Node exits before stdout flushes (common on Windows).
+process.on('unhandledRejection', (reason) => {
+  // A single rejected promise (a flaky printer request, a driver hiccup) must not
+  // take the whole farm down. Log and keep running. (Previously: process.exit(1),
+  // which meant one unhandled rejection killed polling for all 50+ printers.)
+  process.stderr.write(`[WARN] unhandledRejection (continuing): ${reason?.stack || reason}\n`);
+});
+process.on('uncaughtException', (err) => {
+  // Unknown state: log, shut down cleanly, exit non-zero so PM2/Docker restarts us.
+  process.stderr.write(`[FATAL] uncaughtException: ${err.stack || err}\n`);
+  shutdown('uncaughtException', 1);
+});
+
 const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
@@ -21,21 +43,24 @@ const modelsRouter       = require('./routes/models')(db);
 const filamentsRouter    = require('./routes/filaments')(db);
 const printerJobsRouter  = require('./routes/printer-jobs')(db);
 
-// ── Process resilience & graceful shutdown ───────────────────────────────────
 // Persist operator notifications to the DB so a crash/restart doesn't leave held
 // printers with no explanation of why.
 notifications.init(db);
 
-let poller       = null;
-let scheduler    = null;
-let server       = null;
-let shuttingDown = false;
+// Graceful shutdown on process-manager signals.
+process.on('SIGINT',  () => shutdown('SIGINT', 0));
+process.on('SIGTERM', () => shutdown('SIGTERM', 0));
 
+// Stop the poller and the hourly backup, tear down persistent printer connections,
+// close the DB, drain in-flight HTTP, then exit. Every step is guarded so an early
+// crash (before requires finished) still exits cleanly. `function` (hoisted) so the
+// crash handlers registered above can call it.
 function shutdown(reason, exitCode) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[server] Shutting down (${reason})...`);
   try { poller?.stop(); } catch (_) {}
+  try { backup.stop(); } catch (_) {}
   try { drivers.closeAllConnections(); } catch (_) {}
   const finish = () => {
     try { db.close(); } catch (_) {}
@@ -48,24 +73,6 @@ function shutdown(reason, exitCode) {
     finish();
   }
 }
-
-process.on('SIGINT',  () => shutdown('SIGINT', 0));
-process.on('SIGTERM', () => shutdown('SIGTERM', 0));
-
-// A single rejected promise — a flaky printer request, a driver hiccup — must not
-// take the whole farm down. Log and keep running. (Previously: process.exit(1),
-// which meant one unhandled rejection killed polling for all 50+ printers.)
-process.on('unhandledRejection', (reason) => {
-  process.stderr.write(`[WARN] unhandledRejection (continuing): ${reason?.stack || reason}\n`);
-});
-
-// An uncaught exception leaves the process in an unknown state: log, shut down
-// cleanly (stop poller, drop printer connections, close DB), then exit non-zero
-// so PM2/Docker restarts us.
-process.on('uncaughtException', (err) => {
-  process.stderr.write(`[FATAL] uncaughtException: ${err.stack || err}\n`);
-  shutdown('uncaughtException', 1);
-});
 
 const app  = express();
 const PORT = process.env.PORT || 3000;

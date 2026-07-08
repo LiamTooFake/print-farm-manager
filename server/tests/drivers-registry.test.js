@@ -1,5 +1,5 @@
-// Verifies the driver registry (server/drivers/index.js): getDriver memoization
-// and unknown-type error, plus the connection-teardown dispatch added for Tier 1
+// Verifies the driver registry (server/drivers/index.js): getDriver resolution and
+// unknown-type error, plus the connection-teardown dispatch added for Tier 1
 // (dropConnection on printer removal, closeAllConnections on shutdown).
 
 // Mock the Bambu driver so we can observe teardown dispatch without real MQTT.
@@ -18,11 +18,10 @@ const drivers = require('../drivers');
 describe('driver registry', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('getDriver returns the driver module and memoizes it', () => {
-    const a = drivers.getDriver('bambu');
-    const b = drivers.getDriver('bambu');
-    expect(a).toBe(bambu);
-    expect(b).toBe(a);
+  test('getDriver resolves a known type to its driver module', () => {
+    // Real functional assertion (not "same as itself"): the registry hands back
+    // the actual bambu module for type 'bambu'.
+    expect(drivers.getDriver('bambu')).toBe(bambu);
   });
 
   test('getDriver throws for an unknown type', () => {

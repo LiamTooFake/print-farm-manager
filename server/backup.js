@@ -45,10 +45,21 @@ function pruneOldBackups() {
   }
 }
 
+let _timer = null;
+
 function start(db) {
   // Run immediately on startup, then every hour
   runBackup(db);
-  setInterval(() => runBackup(db), INTERVAL_MS);
+  _timer = setInterval(() => runBackup(db), INTERVAL_MS);
 }
 
-module.exports = { start, runBackup };
+// Stop the hourly timer — called on graceful shutdown before db.close() so a
+// scheduled backup can't start against a connection that's about to close.
+function stop() {
+  if (_timer) {
+    clearInterval(_timer);
+    _timer = null;
+  }
+}
+
+module.exports = { start, runBackup, stop };
