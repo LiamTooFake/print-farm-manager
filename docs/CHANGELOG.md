@@ -74,6 +74,14 @@ Verified clean via the full suite (**27 suites, 402 tests**) and a live boot (`/
 
 Remaining coverage gaps the review flagged (no live defect; regression-protection only): direct tests for `shutdown()` ordering, the `/api/health` branches, and the global error handler would each need `index.js` to export those units (or an `if (require.main === module)` listen guard for full-server integration tests) — deferred.
 
+### Follow-up (PR review, round 2) — 2026-07-08
+
+- **[P2] Wait for an in-flight backup before closing the DB.** `backup.stop()` only cleared the future interval — a `SIGTERM` landing during the startup or hourly `db.backup()` still let `shutdown()` reach `db.close()`/`process.exit()` mid-copy, risking a corrupt snapshot. `server/backup.js` now tracks the active backup promise and exposes `whenIdle()`; `shutdown()` awaits it before `db.close()`, with an absolute 5s force-exit failsafe so a hung backup or connection can't wedge shutdown.
+- **[P2] Drop the cached driver connection when a printer's connection settings change.** `PUT /api/printers/:id` can change `ip`/`type`/`api_key`/`serial_number`, but Bambu/Elegoo drivers cache a client per `printer.id` and `getConnection()` returned the stale one — so after an operator fixed an IP/access-code/serial/connector the poller kept talking to the old host until restart. The PUT handler now calls `drivers.dropConnection(oldRow)` whenever a connection-defining field changes (using the pre-update row so a type change tears the connection down under its previous driver); the next poll reconnects with the new settings.
+- **[P3] Docs index.** `docs/README.md` still called `notifications.js` an "In-memory operator alert store" — updated to reflect the persisted `notifications` table.
+
+Tests: `server/tests/backup.test.js` (new) covers `whenIdle()` waiting for an in-flight backup; `server/tests/printers-dropconnection.test.js` gains cases for PUT changing `ip`/`api_key`/`serial_number` (drops) vs a non-connection field (no drop). Full suite: **28 suites, 408 tests**.
+
 ---
 
 ## 2026-07-06 - update.bat: discard package-lock.json drift before pulling

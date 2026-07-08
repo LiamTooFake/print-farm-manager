@@ -23,6 +23,7 @@ beforeAll(() => {
       group_name TEXT, type TEXT DEFAULT 'prusa', model TEXT NOT NULL,
       status TEXT DEFAULT 'UNKNOWN', is_held INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1,
       decommissioned_at INTEGER, decommission_note TEXT, serial_number TEXT DEFAULT '',
+      loaded_material TEXT, loaded_color TEXT,
       created_at INTEGER NOT NULL
     );
     CREATE TABLE projects (
@@ -121,5 +122,27 @@ test('POST /:id/mark-job-failure drops the connection', async () => {
 test('a 404 (unknown printer) does not call dropConnection', async () => {
   await request(app).delete('/api/printers/99999');
   await request(app).post('/api/printers/99999/decommission');
+  expect(dropSpy).not.toHaveBeenCalled();
+});
+
+// --- PUT: connection-defining fields ---------------------------------------
+
+test.each([
+  ['ip', { ip: '10.0.0.99' }],
+  ['api_key (access code)', { api_key: 'new-access-code' }],
+  ['serial_number', { serial_number: 'SN-CHANGED' }],
+])('PUT that changes %s drops the stale connection with the OLD printer row', async (_label, body) => {
+  const id = seedPrinter({ type: 'bambu', model: 'x1c', ip: '10.0.0.9', api_key: 'old', serial_number: 'SN-OLD' });
+  const res = await request(app).put(`/api/printers/${id}`).send(body);
+  expect(res.status).toBe(200);
+  // Dropped using the pre-update row (old type/id) so a driver change tears down
+  // the connection under its previous driver.
+  expect(dropSpy).toHaveBeenCalledWith(expect.objectContaining({ id, type: 'bambu' }));
+});
+
+test('PUT that changes only a non-connection field does NOT drop the connection', async () => {
+  const id = seedPrinter({ type: 'bambu', model: 'x1c' });
+  const res = await request(app).put(`/api/printers/${id}`).send({ group_name: 'Bay 4' });
+  expect(res.status).toBe(200);
   expect(dropSpy).not.toHaveBeenCalled();
 });

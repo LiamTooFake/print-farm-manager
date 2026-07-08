@@ -212,6 +212,21 @@ module.exports = (db) => {
         }
       }
 
+      // If a connection-defining field changed, drop the stale cached driver
+      // connection (Bambu/Elegoo cache a client per printer.id and won't notice a
+      // new ip/access-code/serial/type on their own). Drop using the OLD printer row
+      // so a type change tears the connection down under its previous driver; the
+      // next poll rebuilds it from the updated settings.
+      const newApiKey = api_key !== undefined ? api_key : printer.api_key;
+      const connectionChanged =
+        after.ip !== printer.ip ||
+        after.type !== printer.type ||
+        after.serial_number !== printer.serial_number ||
+        newApiKey !== printer.api_key;
+      if (connectionChanged) {
+        drivers.dropConnection(printer);
+      }
+
       res.json(db.prepare('SELECT * FROM printers WHERE id = ?').get(req.params.id));
     } catch (err) {
       if (err.message.includes('UNIQUE')) {

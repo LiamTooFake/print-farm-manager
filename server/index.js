@@ -60,15 +60,26 @@ function shutdown(reason, exitCode) {
   shuttingDown = true;
   console.log(`[server] Shutting down (${reason})...`);
   try { poller?.stop(); } catch (_) {}
-  try { backup.stop(); } catch (_) {}
+  try { backup.stop(); } catch (_) {}   // stop SCHEDULING new backups
   try { drivers.closeAllConnections(); } catch (_) {}
+
+  // Absolute failsafe: force-exit after 5s no matter what — a lingering HTTP
+  // connection or an unexpectedly slow backup must never wedge shutdown.
+  setTimeout(() => process.exit(exitCode), 5000).unref();
+
   const finish = () => {
-    try { db.close(); } catch (_) {}
-    process.exit(exitCode);
+    // Wait for any in-flight online backup to finish before closing the DB, so we
+    // never terminate mid-`db.backup()` and leave a corrupt snapshot. `whenIdle`
+    // resolves immediately when no backup is running.
+    let idle;
+    try { idle = backup.whenIdle(); } catch (_) { idle = undefined; }
+    Promise.resolve(idle).catch(() => {}).then(() => {
+      try { db.close(); } catch (_) {}
+      process.exit(exitCode);
+    });
   };
   if (server) {
     server.close(finish);
-    setTimeout(finish, 5000).unref(); // force-exit if a connection lingers
   } else {
     finish();
   }

@@ -15,7 +15,18 @@ function timestamp() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}`;
 }
 
+let _active = null; // promise of the in-flight backup, or null when idle
+
 async function runBackup(db) {
+  // Track the in-flight run so graceful shutdown can wait for it before closing
+  // the DB — closing the connection (or exiting) mid-`db.backup()` corrupts the
+  // snapshot. `_doBackup` swallows its own errors, so `_active` never rejects.
+  const p = _doBackup(db);
+  _active = p;
+  try { await p; } finally { if (_active === p) _active = null; }
+}
+
+async function _doBackup(db) {
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
   const dest = path.join(BACKUP_DIR, `farm-${timestamp()}.db`);
@@ -62,4 +73,13 @@ function stop() {
   }
 }
 
-module.exports = { start, runBackup, stop };
+// Resolves once no backup is in flight (immediately if already idle). Graceful
+// shutdown awaits this after stop() and before db.close(), so it never closes the
+// connection or exits mid-`db.backup()`.
+async function whenIdle() {
+  while (_active) {
+    try { await _active; } catch (_) { /* _doBackup never rejects; belt-and-braces */ }
+  }
+}
+
+module.exports = { start, runBackup, stop, whenIdle };
