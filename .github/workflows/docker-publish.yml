@@ -37,6 +37,12 @@ jobs:
       - name: Run test suite
         run: npm test
 
+      - name: Install client dependencies
+        run: npm install --prefix client --legacy-peer-deps
+
+      - name: Run client test suite
+        run: npm test --prefix client
+
   build:
     needs: test
     if: github.event_name != 'pull_request'

@@ -310,3 +310,24 @@ npm run dev     # starts Vite on port 5173
 ```
 
 The server must also be running for API calls to succeed.
+
+## Testing
+
+The client is tested with **Vitest** + **React Testing Library** in a jsdom DOM. Config lives in the `test` block of `client/vite.config.js`; `client/src/test/setup.js` registers the `@testing-library/jest-dom` matchers and unmounts each tree after the test.
+
+```bash
+npm run test:client       # from the repo root (runs client tests once)
+# or
+cd client && npm test     # vitest run
+cd client && npm run test:watch
+npm run test:all          # from root: server (jest) + client (vitest)
+```
+
+Tests are co-located as `*.test.jsx` next to the component/page. CI runs them in the same `test` job as the server suite (see `docs/docker-publish.md`).
+
+**Patterns:**
+- Components using `<Link>`/router hooks are rendered inside a `<MemoryRouter>` (see `EmptyState.test.jsx`).
+- Timer-driven UI (`PollTimer`) uses `vi.useFakeTimers()` + `vi.setSystemTime()`, advancing the clock inside `act()`.
+- Pages fetch with the native `fetch`, so page tests stub `global.fetch` with a small URL router that returns canned JSON (`{ ok, json }`), then assert on rendered output and the request URLs (see `Jobs.test.jsx`).
+
+Current coverage is a starting harness (`EmptyState`, `PollTimer`, `Jobs`); the remaining pages are still to be covered.

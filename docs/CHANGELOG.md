@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-07-07 — Client test harness (Vitest + React Testing Library)
+
+The React client had **zero tests and no test runner** — the biggest coverage gap in the project. This adds the harness and a first batch of tests so client behavior can be pinned going forward.
+
+- **Vitest 4** + **React Testing Library** running in **jsdom**. Config is a `test` block in `client/vite.config.js`; `client/src/test/setup.js` wires the `@testing-library/jest-dom` matchers and per-test cleanup.
+- Scripts: `npm test` / `npm run test:watch` in `client/`; `npm run test:client` and `npm run test:all` from the repo root.
+- **CI**: the `test` job in `.github/workflows/docker-publish.yml` now also installs client deps and runs the client suite (via `npm install` on the client, which stays robust across the CI platform's optional native deps — `npm ci` is not used there). `build`/`merge` already gate on this job.
+- **First tests** (12, co-located as `*.test.jsx`):
+  - `EmptyState` — rendering, conditional hint, and the router `<Link>` action.
+  - `PollTimer` — the countdown ring and title under `vi.useFakeTimers()`.
+  - `Jobs` — a `fetch`-mocked page test: renders jobs, shows the empty state, and refetches with the right query param when the status filter changes. Establishes the `global.fetch` stub pattern the remaining page tests will reuse.
+
+### Changes
+- `client/package.json`: `vitest`, `jsdom`, `@testing-library/{react,dom,jest-dom,user-event}` devDeps; `test` / `test:watch` scripts.
+- `client/vite.config.js`: Vitest `test` config. `client/src/test/setup.js` (new).
+- `client/src/components/EmptyState.test.jsx`, `client/src/components/PollTimer.test.jsx`, `client/src/pages/Jobs.test.jsx` (new).
+- `package.json`: `test:client` + `test:all` scripts. `.github/workflows/docker-publish.yml`: client install + test steps.
+- `docs/web-app.md`: new **Testing** section (how to run, the patterns, current coverage).
+
+### Not yet covered (follow-up)
+- The remaining pages (Fleet, Dashboard, Projects, Printers, PrinterDetail, Settings, Decommissioned) and the `useConfirm`/`useToast` hooks. Highest-value next targets: the `completed_qty` edit guardrail dialogs in `Projects.jsx` (destructive operator action) and `Fleet.jsx`'s `displayStatus()` overlay logic.
+
+---
+
 ## 2026-07-06 - update.bat: discard package-lock.json drift before pulling
 
 `update.bat` runs `npm install`, which rewrites `package-lock.json` when the farm machine's npm version differs from the one that generated the lockfile. That local drift blocked `git pull` ("Your local changes ... would be overwritten by merge") the first time the lockfile changed upstream (the 2026-07-03 js-yaml bump). Hit on a real farm machine 2026-07-06.

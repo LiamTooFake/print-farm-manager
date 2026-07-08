@@ -12,4 +12,11 @@ export default defineConfig({
       },
     },
   },
+  // Vitest — component/unit tests run in a jsdom DOM with jest-dom matchers.
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.js',
+    css: false,
+  },
 });
