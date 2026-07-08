@@ -82,6 +82,15 @@ Remaining coverage gaps the review flagged (no live defect; regression-protectio
 
 Tests: `server/tests/backup.test.js` (new) covers `whenIdle()` waiting for an in-flight backup; `server/tests/printers-dropconnection.test.js` gains cases for PUT changing `ip`/`api_key`/`serial_number` (drops) vs a non-connection field (no drop). Full suite: **28 suites, 408 tests**.
 
+### Follow-up (PR review, round 3) — 2026-07-08
+
+Rebased the branch onto the latest `main` (Docker dev-workflow, PR #24) to clear a merge conflict, then two more review fixes:
+
+- **[P2] Track the in-flight backup correctly across overlapping runs.** The round-2 fix kept a single `_active` promise that each `runBackup` overwrote — so if a slow run overlapped the next hourly tick and the newer run finished first, `whenIdle()` could report idle while the older `db.backup()` was still copying, reintroducing the mid-copy-close race. `runBackup` now **skips** if a backup is already in flight (backups take seconds; this also avoids two concurrent `db.backup()` on one connection), so `_active` always refers to the single running backup.
+- **[P2] Disable Centauri autoreconnect before dropping the socket.** `elegoo-centauri.js` `dropConnection()` closed the WebSocket but left `AutoReconnect` set, and `SDCPPrinterWS`'s close handler re-`Connect`s whenever `AutoReconnect !== false` — so a dropped Centauri connection (delete/decommission/restore/shutdown) revived itself and the reconnect loop outlived the printer. Now sets `client.AutoReconnect = false` (the exact value the lib treats as off — a number sets a retry interval) before `Disconnect()`.
+
+Tests: `backup.test.js` gains a no-overlap case; `elegoo-driver.test.js` gains `dropConnection`/`closeAll` cases asserting `AutoReconnect` is set to `false`, `Disconnect` is called, and the pool entry is removed (next poll reconstructs the client). Full suite: **28 suites, 412 tests**.
+
 ---
 
 ## 2026-07-06 - update.bat: discard package-lock.json drift before pulling

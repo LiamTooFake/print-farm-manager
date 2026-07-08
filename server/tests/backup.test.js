@@ -27,4 +27,19 @@ describe('backup.whenIdle', () => {
   test('resolves immediately when no backup is running', async () => {
     await expect(backup.whenIdle()).resolves.toBeUndefined();
   });
+
+  test('does not start a second backup while one is in flight (prevents overlap)', async () => {
+    let release;
+    let calls = 0;
+    const fakeDb = { backup: () => { calls++; return new Promise((r) => { release = r; }); } };
+
+    const first = backup.runBackup(fakeDb); // in flight — db.backup called once
+    await backup.runBackup(fakeDb);         // must skip immediately, not call db.backup again
+    expect(calls).toBe(1);
+
+    release();
+    await first;
+    // whenIdle is now accurate because _active was never overwritten by an overlapping run.
+    await expect(backup.whenIdle()).resolves.toBeUndefined();
+  });
 });

@@ -18,9 +18,17 @@ function timestamp() {
 let _active = null; // promise of the in-flight backup, or null when idle
 
 async function runBackup(db) {
+  // Never run two backups at once: a slow run overlapping the next hourly tick
+  // would overwrite `_active`, so whenIdle() could see it cleared (newer run done)
+  // while an older `db.backup()` is still copying — the exact mid-copy-close race
+  // this guards against. It also avoids two concurrent db.backup() on one
+  // connection. Backups take seconds, so skipping a tick here is harmless.
+  if (_active) {
+    console.warn('[backup] Previous backup still running — skipping this run');
+    return;
+  }
   // Track the in-flight run so graceful shutdown can wait for it before closing
-  // the DB — closing the connection (or exiting) mid-`db.backup()` corrupts the
-  // snapshot. `_doBackup` swallows its own errors, so `_active` never rejects.
+  // the DB. `_doBackup` swallows its own errors, so `_active` never rejects.
   const p = _doBackup(db);
   _active = p;
   try { await p; } finally { if (_active === p) _active = null; }

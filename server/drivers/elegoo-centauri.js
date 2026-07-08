@@ -59,10 +59,17 @@ async function getConnection(printer) {
   return client;
 }
 
-// Remove a connection from the pool (called when a printer is unreachable)
+// Remove a connection from the pool (called when a printer is unreachable, or is
+// deleted/decommissioned, or on graceful shutdown).
 function dropConnection(printerId) {
   const client = connections.get(printerId);
   if (client) {
+    // Turn OFF autoreconnect before disconnecting. SDCPPrinterWS's close handler
+    // re-Connects whenever AutoReconnect !== false, so without this the socket we're
+    // dropping revives itself and the reconnect loop outlives the printer. Only the
+    // exact value `false` disables it — a number sets a retry interval (see
+    // sdcp/SDCPPrinterWS.js set AutoReconnect / the close handler).
+    try { client.AutoReconnect = false; } catch (_) {}
     try { client.Disconnect?.(); } catch (_) {}
     connections.delete(printerId);
   }
